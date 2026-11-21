@@ -15,13 +15,22 @@ import {
   CircleDot,
   MapPin,
   MessageSquare,
-  Utensils
+  Utensils,
+  ListChecks,
+  BookMarked,
+  ScrollText,
+  Sparkles
 } from 'lucide-react';
+import { Share } from '@capacitor/share';
 
 export default function More() {
   const navigate = useNavigate();
 
   const menuItems = [
+    { id: 'amal', icon: <ListChecks className="text-emerald-600" />, label: 'আমল ট্র্যাকার ও কাযা হিসাব', path: '/amal' },
+    { id: 'namaz', icon: <BookMarked className="text-teal-600" />, label: 'নামাজ শিক্ষা', path: '/namaz' },
+    { id: 'kalima', icon: <ScrollText className="text-amber-600" />, label: 'ছয় কালিমা', path: '/kalima' },
+    { id: 'askhujur', icon: <Sparkles className="text-amber-500" />, label: 'হুজুরকে জিজ্ঞাসা (AI)', path: '/ask-hujur' },
     { id: 'names', icon: <Heart className="text-pink-500" />, label: 'আল্লাহর ৯৯টি নাম', path: '/names' },
     { id: 'dua', icon: <MessageSquare className="text-blue-500" />, label: 'দোয়া ও জিকির', path: '/dua' },
     { id: 'mosques', icon: <MapPin className="text-red-500" />, label: 'মসজিদ খুঁজুন', path: '/mosques' },
@@ -49,11 +58,16 @@ export default function More() {
       if (item.id === 'about') {
         alert("অ্যাপ সম্পর্কে:\n\nএই অ্যাপটি তৈরি করেছেন আহমেদ সাজিদ হাসান (Ahmed Sajid Hasan)।\nতিনি বর্তমানে বুয়েট সিএসই '২১ ব্যাচের (BUET CSE '21 Batch) একজন শিক্ষার্থী।");
       } else if (item.id === 'share') {
-        alert("শেয়ার ফিচারটি শীঘ্রই আসছে!");
+        Share.share({
+          title: 'ইসলামিক অ্যাপ',
+          text: 'নামাজের সময়, কুরআন, হাদিস, কিবলা, আমল ট্র্যাকার — সব এক অ্যাপে। ডাউনলোড করুন:',
+          url: 'https://github.com/Your-Tribal-Chief/IslamicApp',
+          dialogTitle: 'শেয়ার করুন',
+        }).catch(() => {});
       } else if (item.id === 'rate') {
         alert("রেটিং দেওয়ার জন্য আপনাকে ধন্যবাদ!");
       } else if (item.id === 'privacy') {
-        alert("আপনার গোপনীয়তা আমাদের কাছে অত্যন্ত গুরুত্বপূর্ণ।");
+        alert("আপনার সব আমল, কাযা হিসাব ও সেটিংস শুধু আপনার ফোনেই সংরক্ষিত থাকে। লোকেশন শুধু নামাজের সময়, কিবলা ও মসজিদ খুঁজতে ব্যবহার হয়।");
       }
     }
   };
@@ -106,7 +120,7 @@ export default function More() {
         </div>
 
         <div className="text-center pt-4 pb-4">
-          <p className="text-xs text-slate-400 font-medium tracking-widest uppercase mb-1">ভার্সন ১.০.০</p>
+          <p className="text-xs text-slate-400 font-medium tracking-widest uppercase mb-1">ভার্সন ১.১.০</p>
           <p className="text-[10px] text-emerald-600 dark:text-emerald-500 font-bold uppercase tracking-wider">Built by Ahmed Sajid Hasan (BUET CSE '21)</p>
         </div>
       </div>

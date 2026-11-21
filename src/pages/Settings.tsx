@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronLeft, Bell, Globe, Moon, Shield, HelpCircle, LogOut } from 'lucide-react';
+import { ChevronLeft, Bell, Globe, Moon, Shield, HelpCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { requestNotifyPermission, cancelPrayerNotifications } from '../lib/native';
@@ -21,7 +21,10 @@ export default function Settings() {
     }
   };
 
-  const settingsGroups = [
+  const [asrSchool, setAsrSchool] = useState(() => localStorage.getItem('asrSchool') ?? '1');
+  const [hijriAdj, setHijriAdj] = useState(() => Number(localStorage.getItem('hijriAdjust') ?? '-1'));
+
+  const settingsGroups: any[] = [
     {
       title: 'সাধারণ',
       items: [
@@ -33,15 +36,16 @@ export default function Settings() {
     {
       title: 'হিসাব পদ্ধতি',
       items: [
-        { id: 'calculation', label: 'প্রার্থনার সময় হিসাব পদ্ধতি', type: 'select', value: 'University of Islamic Sciences, Karachi' },
-        { id: 'asr', label: 'আসর নামাজের পদ্ধতি', type: 'select', value: 'Hanafi' },
+        { id: 'calculation', label: 'নামাজের সময় হিসাব পদ্ধতি', type: 'select', value: 'Karachi (বাংলাদেশ)' },
+        { id: 'asr', label: 'আসর নামাজের পদ্ধতি', type: 'select', value: asrSchool === '1' ? 'হানাফি' : 'শাফেয়ী', onClick: () => { const v = asrSchool === '1' ? '0' : '1'; localStorage.setItem('asrSchool', v); setAsrSchool(v); } },
+        { id: 'hijri', label: 'হিজরি তারিখ সমন্বয়', type: 'select', value: `${hijriAdj > 0 ? '+' : ''}${hijriAdj} দিন`.replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[+d]), onClick: () => { const opts = [-2, -1, 0, 1]; const v = opts[(opts.indexOf(hijriAdj) + 1) % opts.length]; localStorage.setItem('hijriAdjust', String(v)); setHijriAdj(v); } },
       ]
     },
     {
       title: 'অন্যান্য',
       items: [
-        { id: 'privacy', icon: <Shield size={20} className="text-slate-600" />, label: 'প্রাইভেসি পলিসি', type: 'link' },
-        { id: 'help', icon: <HelpCircle size={20} className="text-slate-600" />, label: 'সাহায্য ও সাপোর্ট', type: 'link' },
+        { id: 'privacy', icon: <Shield size={20} className="text-slate-600" />, label: 'প্রাইভেসি পলিসি', type: 'link', onClick: () => alert('আপনার সব আমল, কাযা হিসাব ও সেটিংস শুধু আপনার ফোনেই সংরক্ষিত থাকে। লোকেশন শুধু নামাজের সময়, কিবলা ও কাছের মসজিদ খুঁজতে ব্যবহার হয়। "হুজুরকে জিজ্ঞাসা" ফিচারে আপনার প্রশ্ন উত্তর তৈরির জন্য Groq AI সার্ভারে পাঠানো হয়।') },
+        { id: 'help', icon: <HelpCircle size={20} className="text-slate-600" />, label: 'সাহায্য ও সাপোর্ট', type: 'link', onClick: () => alert('যেকোনো সমস্যা বা পরামর্শের জন্য GitHub-এ যোগাযোগ করুন: github.com/Your-Tribal-Chief') },
       ]
     }
   ];
@@ -63,7 +67,7 @@ export default function Settings() {
             <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4">{group.title}</h3>
             <div className="bg-white dark:bg-slate-900 rounded-[32px] overflow-hidden border border-slate-100 dark:border-slate-800 shadow-sm transition-colors">
               {group.items.map((item, itemIdx) => (
-                <div key={item.id} className={`flex items-center justify-between p-5 ${itemIdx !== group.items.length - 1 ? 'border-b border-slate-50 dark:border-slate-800' : ''}`}>
+                <div key={item.id} onClick={() => item.onClick?.()} className={`flex items-center justify-between p-5 ${item.onClick ? 'cursor-pointer active:bg-slate-50 dark:active:bg-slate-800' : ''} ${itemIdx !== group.items.length - 1 ? 'border-b border-slate-50 dark:border-slate-800' : ''}`}>
                   <div className="flex items-center space-x-4">
                     {item.icon && <div className="p-2 bg-slate-50 dark:bg-slate-800 rounded-xl">{item.icon}</div>}
                     <span className="font-bold text-slate-700 dark:text-slate-300 text-sm">{item.label}</span>
@@ -71,7 +75,7 @@ export default function Settings() {
                   
                   {item.type === 'toggle' && (
                     <button 
-                      onClick={() => item.onChange && item.onChange(!item.value)}
+                      onClick={(e) => { e.stopPropagation(); item.onChange && item.onChange(!item.value); }}
                       className={`w-12 h-6 rounded-full transition-colors relative ${item.value ? 'bg-emerald-600' : 'bg-slate-200 dark:bg-slate-700'}`}
                     >
                       <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${item.value ? 'left-7' : 'left-1'}`} />
@@ -93,10 +97,7 @@ export default function Settings() {
           </div>
         ))}
 
-        <button className="w-full flex items-center justify-center space-x-2 p-5 bg-white dark:bg-slate-900 rounded-[32px] text-red-500 font-bold border border-red-50 dark:border-red-900/30 shadow-sm active:scale-95 transition-all">
-          <LogOut size={20} />
-          <span>লগ আউট</span>
-        </button>
+        <p className="text-[11px] text-slate-400 text-center px-6">আসর পদ্ধতি পরিবর্তনের পর হোম স্ক্রিন আবার খুললে নতুন সময় দেখাবে।</p>
       </div>
     </div>
   );

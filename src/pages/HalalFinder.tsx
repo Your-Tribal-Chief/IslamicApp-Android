@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, MapPin, Navigation, ExternalLink, RefreshCw, Utensils } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { overpass, distanceKm, formatDistanceBn } from '../lib/offline';
 
 interface Place {
   name: string;
@@ -19,32 +20,35 @@ export default function HalalFinder() {
     setError(null);
     try {
       const radius = 5000; // 5km radius
-      const query = `[out:json];(node["amenity"="restaurant"](around:${radius},${lat},${lng});way["amenity"="restaurant"](around:${radius},${lat},${lng});relation["amenity"="restaurant"](around:${radius},${lat},${lng});node["cuisine"="halal"](around:${radius},${lat},${lng});way["cuisine"="halal"](around:${radius},${lat},${lng}););out center;`;
+      const query = `[out:json][timeout:25];(node["amenity"~"restaurant|fast_food|cafe"](around:${radius},${lat},${lng});way["amenity"~"restaurant|fast_food|cafe"](around:${radius},${lat},${lng}););out center 300;`;
       
-      const response = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
-
-      if (!response.ok) throw new Error("OSM API failed");
-      
-      const data = await response.json();
+      const data = await overpass(query);
       
       if (data.elements && data.elements.length > 0) {
+        const isHalal = (el: any) => {
+          const t = el.tags || {};
+          const name = (t.name || '').toLowerCase();
+          return name.includes('halal') || (t.cuisine || '').toLowerCase().includes('halal') || ['yes', 'only'].includes((t['diet:halal'] || '').toLowerCase()) || (t.halal || '').toLowerCase() === 'yes';
+        };
+        // বাংলাদেশে বেশিরভাগ রেস্টুরেন্টে OSM-এ halal ট্যাগ থাকে না; তাই ট্যাগযুক্তগুলো আগে, বাকিগুলো পরে দেখানো হয়
         const foundPlaces: Place[] = data.elements
-          .filter((el: any) => {
-            const name = (el.tags.name || '').toLowerCase();
-            const cuisine = (el.tags.cuisine || '').toLowerCase();
-            const diet = (el.tags['diet:halal'] || '').toLowerCase();
-            const halalTag = (el.tags.halal || '').toLowerCase();
-            return name.includes('halal') || cuisine.includes('halal') || diet === 'yes' || halalTag === 'yes';
-          })
+          .filter((el: any) => el.tags?.name)
           .map((el: any) => {
             const latVal = el.lat || el.center?.lat;
             const lonVal = el.lon || el.center?.lon;
+            const km = distanceKm(lat, lng, latVal, lonVal);
+            const halal = isHalal(el);
             return {
               name: el.tags.name || el.tags['name:en'] || el.tags['name:bn'] || 'রেস্টুরেন্ট',
-              address: el.tags['addr:full'] || el.tags['addr:street'] || el.tags['addr:place'] || 'ঠিকানা ম্যাপে দেখুন',
-              url: `https://www.google.com/maps/search/?api=1&query=${latVal},${lonVal}`
+              address: `${halal ? '✓ হালাল ট্যাগযুক্ত • ' : ''}${formatDistanceBn(km)} দূরে • ${el.tags['addr:full'] || el.tags['addr:street'] || el.tags['addr:place'] || 'ঠিকানা ম্যাপে দেখুন'}`,
+              url: `https://www.google.com/maps/dir/?api=1&destination=${latVal},${lonVal}`,
+              _h: halal ? 0 : 1,
+              _km: km,
             };
-          });
+          })
+          .sort((a: any, b: any) => a._h - b._h || a._km - b._km)
+          .slice(0, 60);
+        if (foundPlaces.length === 0) setError("কাছাকাছি কোনো রেস্টুরেন্ট পাওয়া যায়নি।");
         setPlaces(foundPlaces);
       } else {
         setError("কাছাকাছি কোনো হালাল রেস্টুরেন্ট পাওয়া যায়নি।");

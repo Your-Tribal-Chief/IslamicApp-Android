@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { MapPin, Moon, Sun, BookOpen, Compass, CircleDot, Heart, Calculator, ChevronRight, BookText, MessageSquare, Bell, BellOff, Sparkles } from 'lucide-react';
+import { MapPin, Moon, Sun, BookOpen, Compass, CircleDot, Heart, Calculator, ChevronRight, BookText, MessageSquare, Bell, BellOff, Sparkles, ListChecks, BookMarked, ScrollText, Flame, CalendarDays } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { format, addMinutes, isBefore, parse } from 'date-fns';
 import { bn } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
+import { dayScore, prayerStreak, getDay, FARD_IDS } from '../lib/amal';
+import { toHijri, HIJRI_MONTHS_BN, nextEvent, toBn } from '../lib/hijri';
 import { requestNotifyPermission, schedulePrayerNotifications, cancelPrayerNotifications, showNow } from '../lib/native';
 
 interface PrayerTimes {
@@ -35,6 +37,7 @@ export default function Dashboard() {
   const [prayerTimes, setPrayerTimes] = useState<PrayerTimes | null>(null);
   const [hijriDate, setHijriDate] = useState<HijriDate | null>(null);
   const [loading, setLoading] = useState(true);
+  const [placeName, setPlaceName] = useState(() => localStorage.getItem('placeName') || 'ঢাকা, বাংলাদেশ');
   const [dailyAyat, setDailyAyat] = useState({ text: '', ref: '' });
   const [currentPrayer, setCurrentPrayer] = useState<{ name: string; id: string; time: string; endsIn: string } | null>(null);
   const [nextPrayer, setNextPrayer] = useState<{ name: string; id: string; time: string; startsIn: string } | null>(null);
@@ -180,48 +183,46 @@ export default function Dashboard() {
     setDailyAyat(ayats[dayOfYear % ayats.length]);
 
     async function fetchData() {
-      try {
-        // Use absolute URLs for Aladhan API
-        let url = 'https://api.aladhan.com/v1/timingsByCity?city=Dhaka&country=Bangladesh&method=1';
-        
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(async (pos) => {
-            const { latitude, longitude } = pos.coords;
-            const res = await fetch(`https://api.aladhan.com/v1/timings?latitude=${latitude}&longitude=${longitude}&method=1`);
-            const data = await res.json();
-            
-            if (data && data.data && data.data.timings) {
-              const timings = data.data.timings;
-              setPrayerTimes(timings);
-              setHijriDate(data.data.date.hijri);
-            } else {
-              throw new Error(data.message || 'Invalid prayer times data');
-            }
-          }, async () => {
-            // Fallback to Dhaka
-            const res = await fetch(url);
-            const data = await res.json();
-            if (data && data.data && data.data.timings) {
-              const timings = data.data.timings;
-              setPrayerTimes(timings);
-              setHijriDate(data.data.date.hijri);
-            }
-          });
-        } else {
-          const res = await fetch(url);
-          const data = await res.json();
-          if (data && data.data && data.data.timings) {
-            const timings = data.data.timings;
-            setPrayerTimes(timings);
-            setHijriDate(data.data.date.hijri);
-          }
+      // school=1 → হানাফি মাযহাব অনুযায়ী আসরের সময় (বাংলাদেশে প্রচলিত); method=1 → Karachi
+      const school = localStorage.getItem('asrSchool') ?? '1';
+      const applyData = (data: any) => {
+        if (data && data.data && data.data.timings) {
+          setPrayerTimes(data.data.timings);
+          setHijriDate(data.data.date.hijri);
         }
+      };
+      const loadByCity = async () => {
+        const res = await fetch(`https://api.aladhan.com/v1/timingsByCity?city=Dhaka&country=Bangladesh&method=1&school=${school}`);
+        applyData(await res.json());
+        setLoading(false);
+      };
+      try {
+        if (!navigator.geolocation) return await loadByCity();
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+          try {
+            const latitude = +pos.coords.latitude.toFixed(2), longitude = +pos.coords.longitude.toFixed(2);
+            const res = await fetch(`https://api.aladhan.com/v1/timings/${format(new Date(), 'dd-MM-yyyy')}?latitude=${latitude}&longitude=${longitude}&method=1&school=${school}`);
+            applyData(await res.json());
+            localStorage.setItem('lastCoords', JSON.stringify({ latitude, longitude }));
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&accept-language=bn&lat=${latitude}&lon=${longitude}`, { headers: { 'User-Agent': 'IslamicApp-Android' } })
+              .then(r => r.json())
+              .then(j => {
+                const a = j.address || {};
+                const name = [a.city || a.town || a.county || a.state_district || a.village, a.country].filter(Boolean).join(', ');
+                if (name) { setPlaceName(name); localStorage.setItem('placeName', name); }
+              }).catch(() => {});
+          } catch (e) {
+            console.error(e);
+          } finally {
+            setLoading(false);
+          }
+        }, () => { loadByCity().catch(() => setLoading(false)); }, { timeout: 10000, maximumAge: 30 * 60 * 1000 });
       } catch (error) {
         console.error('Failed to fetch prayer times:', error);
-      } finally {
         setLoading(false);
       }
     }
+
     fetchData();
   }, []); // Only fetch once on mount
 
@@ -305,7 +306,7 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-full bg-[#f5f5f0] space-y-4">
+      <div className="flex flex-col items-center justify-center h-full bg-[#f5f5f0] dark:bg-[#0c0c0c] space-y-4">
         <div className="w-12 h-12 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
         <p className="text-slate-500 font-medium">লোড হচ্ছে...</p>
       </div>
@@ -326,7 +327,7 @@ export default function Dashboard() {
             <div className="flex items-center space-x-3">
               <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center border border-white/20 shadow-inner">
                 <img 
-                  src="https://cdn-icons-png.flaticon.com/512/2913/2913520.png" 
+                  src="/icon-192x192.png" 
                   alt="Logo" 
                   className="w-8 h-8 object-contain"
                   referrerPolicy="no-referrer"
@@ -336,7 +337,7 @@ export default function Dashboard() {
                 <h1 className="text-2xl font-bold font-serif mb-0.5">আস-সালামু আলাইকুম</h1>
                 <div className="flex items-center text-emerald-100/80 text-[10px] font-medium">
                   <MapPin size={10} className="mr-1" />
-                  <span>ঢাকা, বাংলাদেশ</span>
+                  <span>{placeName}</span>
                 </div>
               </div>
             </div>
@@ -355,7 +356,7 @@ export default function Dashboard() {
               </button>
               <div className="text-right">
                 <div className="text-sm font-bold bg-white/10 px-3 py-1.5 rounded-2xl backdrop-blur-md border border-white/10">
-                  {convertToBanglaNumber(hijriDate?.day || '')} {hijriDate?.month.en} {convertToBanglaNumber(hijriDate?.year || '')}
+                  {(() => { const h = toHijri(new Date()); return `${convertToBanglaNumber(String(h.day))} ${HIJRI_MONTHS_BN[h.month - 1]} ${convertToBanglaNumber(String(h.year))}`; })()}
                 </div>
                 <div className="text-[10px] text-emerald-100/60 mt-2 font-bold uppercase tracking-widest">
                   {convertToBanglaNumber(format(new Date(), 'dd MMMM yyyy', { locale: bn }))}
@@ -398,7 +399,46 @@ export default function Dashboard() {
           <QuickAction to="/names" icon={<Heart className="text-pink-500" />} label="নামসমূহ" />
           <QuickAction to="/zakat" icon={<Calculator className="text-emerald-500" />} label="যাকাত" />
           <QuickAction to="/ask-hujur" icon={<Sparkles className="text-amber-500" />} label="হুজুর" />
+          <QuickAction to="/amal" icon={<ListChecks className="text-emerald-700" />} label="আমল" />
+          <QuickAction to="/namaz" icon={<BookMarked className="text-teal-600" />} label="নামাজ শিক্ষা" />
+          <QuickAction to="/kalima" icon={<ScrollText className="text-amber-600" />} label="কালিমা" />
         </div>
+      </div>
+
+      {/* Today's Amal + upcoming event */}
+      <div className="px-4 mt-6 grid grid-cols-2 gap-4">
+        {(() => {
+          const sc = dayScore(new Date());
+          const today = getDay(new Date());
+          const fardDone = FARD_IDS.filter(id => today[id]).length;
+          return (
+            <Link to="/amal" className="bg-white dark:bg-slate-900 rounded-3xl p-4 shadow-sm border border-slate-100 dark:border-slate-800 block">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[11px] text-slate-400 font-bold">আজকের আমল</p>
+                <ListChecks size={16} className="text-emerald-600" />
+              </div>
+              <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{toBn(sc.pct)}%</p>
+              <div className="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full mt-2 overflow-hidden">
+                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${sc.pct}%` }} />
+              </div>
+              <p className="text-[10px] text-slate-500 mt-2">নামাজ {toBn(fardDone)}/৫ • <Flame size={10} className="inline text-orange-500" /> {toBn(prayerStreak())} দিন</p>
+            </Link>
+          );
+        })()}
+        {(() => {
+          const ev = nextEvent();
+          return (
+            <Link to="/calendar" className="bg-white dark:bg-slate-900 rounded-3xl p-4 shadow-sm border border-slate-100 dark:border-slate-800 block">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[11px] text-slate-400 font-bold">আসন্ন দিবস</p>
+                <CalendarDays size={16} className="text-indigo-500" />
+              </div>
+              <p className="text-base font-bold text-slate-800 dark:text-slate-100 leading-tight">{ev?.name ?? '—'}</p>
+              <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold mt-2">{ev ? (ev.daysLeft === 0 ? 'আজ' : `${toBn(ev.daysLeft)} দিন বাকি`) : ''}</p>
+              <p className="text-[10px] text-slate-400">{ev ? convertToBanglaNumber(format(ev.date, 'd MMMM', { locale: bn })) : ''}</p>
+            </Link>
+          );
+        })()}
       </div>
 
       {/* Sehri & Iftar Cards */}

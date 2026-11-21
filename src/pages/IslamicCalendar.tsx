@@ -3,32 +3,17 @@ import { ChevronLeft, ChevronRight as ChevronRightIcon, Calendar as CalendarIcon
 import { useNavigate } from 'react-router-dom';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isBefore } from 'date-fns';
 import { bn } from 'date-fns/locale';
+import { toHijri, eventsInMonth, HIJRI_MONTHS_BN } from '../lib/hijri';
 
 export default function IslamicCalendar() {
   const navigate = useNavigate();
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [hijriDate, setHijriDate] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    async function fetchHijri() {
-      try {
-        const res = await fetch(`https://api.aladhan.com/v1/gToH/${format(currentDate, 'dd-MM-yyyy')}`);
-        const data = await res.json();
-        if (data && data.data && data.data.hijri) {
-          setHijriDate(data.data.hijri);
-        }
-      } catch (error) {
-        console.error('Failed to fetch hijri date:', error);
-      }
-    }
-    fetchHijri();
-  }, [currentDate]);
 
   const convertToBanglaNumber = (numStr: string | number) => {
     const banglaDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
@@ -40,19 +25,12 @@ export default function IslamicCalendar() {
     end: endOfMonth(currentDate),
   });
 
-  const events = [
-    { name: 'শবে বরাত', date: '2026-02-04', hijri: '১৫ শাবান' },
-    { name: 'রমজান শুরু', date: '2026-02-18', hijri: '১ রমজান' },
-    { name: 'শবে কদর', date: '2026-03-16', hijri: '২৭ রমজান' },
-    { name: 'ঈদুল ফিতর', date: '2026-03-20', hijri: '১ শাওয়াল' },
-    { name: 'ঈদুল আযহা', date: '2026-05-27', hijri: '১০ জিলহজ' },
-    { name: 'আশুরা', date: '2026-07-25', hijri: '১০ মহরম' },
-  ];
-
-  const monthEvents = events.filter(e => {
-    const eventDate = new Date(e.date);
-    return eventDate.getMonth() === currentDate.getMonth() && eventDate.getFullYear() === currentDate.getFullYear();
-  });
+  const monthEvents = eventsInMonth(currentDate.getFullYear(), currentDate.getMonth());
+  const hStart = toHijri(startOfMonth(currentDate));
+  const hEnd = toHijri(endOfMonth(currentDate));
+  const hijriLabel = hStart.month === hEnd.month
+    ? `${HIJRI_MONTHS_BN[hStart.month - 1]} ${convertToBanglaNumber(hStart.year)}`
+    : `${HIJRI_MONTHS_BN[hStart.month - 1]} – ${HIJRI_MONTHS_BN[hEnd.month - 1]} ${convertToBanglaNumber(hEnd.year)}`;
 
   return (
     <div className="flex flex-col min-h-full bg-[#f5f5f0] dark:bg-[#0c0c0c] pb-8 transition-colors duration-300">
@@ -82,11 +60,9 @@ export default function IslamicCalendar() {
               <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">
                 {format(currentDate, 'MMMM yyyy', { locale: bn })}
               </h2>
-              {hijriDate && (
-                <p className="text-emerald-600 dark:text-emerald-400 text-xs font-bold uppercase tracking-wider mt-1">
-                  {hijriDate.month.en} {convertToBanglaNumber(hijriDate.year)} হিজরি
-                </p>
-              )}
+              <p className="text-emerald-600 dark:text-emerald-400 text-xs font-bold tracking-wider mt-1">
+                {hijriLabel} হিজরি
+              </p>
             </div>
             <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 bg-slate-50 dark:bg-slate-800 rounded-xl text-emerald-600 dark:text-emerald-400">
               <ChevronRightIcon size={20} />
@@ -112,14 +88,15 @@ export default function IslamicCalendar() {
               <div 
                 key={day.toString()} 
                 className={cn(
-                  "h-10 flex flex-col items-center justify-center rounded-xl text-sm font-bold transition-all relative",
+                  "h-11 flex flex-col items-center justify-center rounded-xl text-sm font-bold transition-all relative",
                   isSameDay(day, new Date()) 
                     ? "bg-emerald-600 text-white shadow-lg shadow-emerald-900/20" 
                     : "text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
                 )}
               >
-                {convertToBanglaNumber(format(day, 'd'))}
-                {events.some(e => isSameDay(new Date(e.date), day)) && (
+                <span className="leading-none">{convertToBanglaNumber(format(day, 'd'))}</span>
+                <span className={cn("text-[8px] leading-none mt-0.5 font-medium", isSameDay(day, new Date()) ? "text-emerald-100" : "text-emerald-600/70 dark:text-emerald-400/60")}>{convertToBanglaNumber(toHijri(day).day)}</span>
+                {monthEvents.some(e => isSameDay(e.date, day)) && (
                   <div className="absolute bottom-1 w-1 h-1 bg-orange-400 rounded-full"></div>
                 )}
               </div>
@@ -132,7 +109,7 @@ export default function IslamicCalendar() {
           <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4">এই মাসের ঘটনাবলী</h3>
           <div className="space-y-3">
             {monthEvents.length > 0 ? monthEvents.map((event, idx) => {
-              const eventDate = new Date(event.date);
+              const eventDate = event.date;
               const isPast = isBefore(eventDate, new Date()) && !isSameDay(eventDate, new Date());
               return (
                 <div key={idx} className={cn(
@@ -167,6 +144,7 @@ export default function IslamicCalendar() {
               </div>
             )}
           </div>
+          <p className="text-[10px] text-slate-400 text-center px-4">হিজরি তারিখ চাঁদ দেখার উপর নির্ভর করে ±১ দিন এদিক-সেদিক হতে পারে। সেটিংস থেকে সমন্বয় করা যাবে।</p>
         </div>
       </div>
     </div>

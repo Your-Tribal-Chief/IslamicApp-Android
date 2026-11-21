@@ -18,6 +18,9 @@ import IslamicCalendar from './pages/IslamicCalendar';
 import HalalFinder from './pages/HalalFinder';
 import More from './pages/More';
 import AskHujur from './pages/AskHujur';
+import AmalTracker from './pages/AmalTracker';
+import Kalima from './pages/Kalima';
+import NamazGuide from './pages/NamazGuide';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 
 function AppContent() {
@@ -55,6 +58,9 @@ function AppContent() {
           <Route path="/ask-hujur" element={<AskHujur />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/more" element={<More />} />
+          <Route path="/amal" element={<AmalTracker />} />
+          <Route path="/kalima" element={<Kalima />} />
+          <Route path="/namaz" element={<NamazGuide />} />
         </Routes>
       </div>
 
@@ -63,7 +69,7 @@ function AppContent() {
           <NavItem to="/" icon={<Home size={22} />} label="হোম" active={location.pathname === '/'} />
           <NavItem to="/quran" icon={<BookOpen size={22} />} label="কুরআন" active={location.pathname === '/quran'} />
           <NavItem to="/hadith" icon={<BookText size={22} />} label="হাদিস" active={location.pathname === '/hadith'} />
-          <NavItem to="/more" icon={<MoreHorizontal size={22} />} label="আরও" active={location.pathname === '/more' || location.pathname === '/qibla' || location.pathname === '/tasbih' || location.pathname === '/names' || location.pathname === '/zakat' || location.pathname === '/dua' || location.pathname === '/mosques'} />
+          <NavItem to="/more" icon={<MoreHorizontal size={22} />} label="আরও" active={location.pathname === '/more' || ['/amal','/kalima','/namaz','/calendar','/halal','/ask-hujur','/settings'].includes(location.pathname) || location.pathname === '/qibla' || location.pathname === '/tasbih' || location.pathname === '/names' || location.pathname === '/zakat' || location.pathname === '/dua' || location.pathname === '/mosques'} />
         </nav>
       )}
     </div>

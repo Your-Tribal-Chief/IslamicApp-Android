@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, MapPin, Navigation, ExternalLink, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { overpass, distanceKm, formatDistanceBn } from '../lib/offline';
 
 interface Mosque {
   name: string;
@@ -23,11 +24,7 @@ export default function MosqueFinder() {
       const radius = 3000; // 3km radius
       const query = `[out:json];(node["amenity"="place_of_worship"]["religion"="muslim"](around:${radius},${lat},${lng});way["amenity"="place_of_worship"]["religion"="muslim"](around:${radius},${lat},${lng});relation["amenity"="place_of_worship"]["religion"="muslim"](around:${radius},${lat},${lng}););out center;`;
       
-      const response = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
-
-      if (!response.ok) throw new Error("OSM API failed");
-      
-      const data = await response.json();
+      const data = await overpass(query);
       
       if (data.elements && data.elements.length > 0) {
         const foundMosques: Mosque[] = data.elements.map((el: any) => {
@@ -36,9 +33,10 @@ export default function MosqueFinder() {
           return {
             name: el.tags.name || el.tags['name:en'] || el.tags['name:bn'] || 'মসজিদ',
             address: el.tags['addr:full'] || el.tags['addr:street'] || el.tags['addr:place'] || 'ঠিকানা ম্যাপে দেখুন',
-            url: `https://www.google.com/maps/search/?api=1&query=${latVal},${lonVal}`
+            km: distanceKm(lat, lng, latVal, lonVal),
+            url: `https://www.google.com/maps/dir/?api=1&destination=${latVal},${lonVal}`
           };
-        });
+        }).sort((a: any, b: any) => a.km - b.km).map((m: any) => ({ ...m, distance: formatDistanceBn(m.km) }));
         setMosques(foundMosques);
       } else {
         setError("কাছাকাছি কোনো মসজিদ পাওয়া যায়নি।");
@@ -140,7 +138,7 @@ export default function MosqueFinder() {
                     <h3 className="font-bold text-slate-800 dark:text-slate-200 text-lg mb-1">{mosque.name}</h3>
                     <div className="flex items-start text-slate-500 dark:text-slate-400 text-sm">
                       <MapPin size={14} className="mr-1.5 mt-0.5 text-emerald-500 shrink-0" />
-                      <span className="line-clamp-2">{mosque.address}</span>
+                      <span className="line-clamp-2">{mosque.distance ? `${mosque.distance} দূরে • ` : ''}{mosque.address}</span>
                     </div>
                   </div>
                   <div className="bg-emerald-50 dark:bg-emerald-950/30 p-3 rounded-2xl text-emerald-600 ml-4">

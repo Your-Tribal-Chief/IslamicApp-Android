@@ -14,8 +14,19 @@ const TASBIH_OPTIONS = [
 
 export default function Tasbih() {
   const navigate = useNavigate();
-  const [selectedTasbih, setSelectedTasbih] = useState(TASBIH_OPTIONS[0]);
-  const [count, setCount] = useState(0);
+  const [selectedTasbih, setSelectedTasbihState] = useState(() => TASBIH_OPTIONS.find(t => t.id === localStorage.getItem('tasbih:selected')) || TASBIH_OPTIONS[0]);
+  const [count, setCountState] = useState(() => Number(localStorage.getItem('tasbih:count:' + (localStorage.getItem('tasbih:selected') || TASBIH_OPTIONS[0].id)) || 0));
+  // অ্যাপ বন্ধ করলেও গণনা হারাবে না
+  const setCount = (v: number | ((p: number) => number)) => setCountState(prev => {
+    const next = typeof v === 'function' ? v(prev) : v;
+    localStorage.setItem('tasbih:count:' + selectedTasbih.id, String(next));
+    return next;
+  });
+  const setSelectedTasbih = (t: typeof TASBIH_OPTIONS[number]) => {
+    localStorage.setItem('tasbih:selected', t.id);
+    setSelectedTasbihState(t);
+    setCountState(Number(localStorage.getItem('tasbih:count:' + t.id) || 0));
+  };
   const [showOptions, setShowOptions] = useState(false);
 
   const handleTap = () => {
@@ -77,7 +88,6 @@ export default function Tasbih() {
                   key={option.id}
                   onClick={() => {
                     setSelectedTasbih(option);
-                    setCount(0);
                     setShowOptions(false);
                   }}
                   className="w-full text-left p-6 border-b border-slate-50 dark:border-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors last:border-0"

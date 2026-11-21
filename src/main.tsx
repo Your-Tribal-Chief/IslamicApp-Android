@@ -6,6 +6,9 @@ import { ThemeProvider } from './context/ThemeContext';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
+import { installOfflineCache } from './lib/offline';
+
+installOfflineCache();
 
 if (Capacitor.isNativePlatform()) {
   StatusBar.setBackgroundColor({ color: '#065f46' }).catch(() => {});
