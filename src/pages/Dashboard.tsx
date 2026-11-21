@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { dayScore, prayerStreak, getDay, FARD_IDS } from '../lib/amal';
 import { toHijri, HIJRI_MONTHS_BN, nextEvent, toBn } from '../lib/hijri';
+import { getLocation, httpJson } from '../lib/net';
 import { requestNotifyPermission, schedulePrayerNotifications, cancelPrayerNotifications, showNow } from '../lib/native';
 
 interface PrayerTimes {
@@ -183,6 +184,8 @@ export default function Dashboard() {
     setDailyAyat(ayats[dayOfYear % ayats.length]);
 
     async function fetchData() {
+      // লোকেশন পেতে দেরি হলেও হোম স্ক্রিন আটকে থাকবে না
+      setTimeout(() => setLoading(false), 5000);
       // school=1 → হানাফি মাযহাব অনুযায়ী আসরের সময় (বাংলাদেশে প্রচলিত); method=1 → Karachi
       const school = localStorage.getItem('asrSchool') ?? '1';
       const applyData = (data: any) => {
@@ -197,26 +200,33 @@ export default function Dashboard() {
         setLoading(false);
       };
       try {
-        if (!navigator.geolocation) return await loadByCity();
-        navigator.geolocation.getCurrentPosition(async (pos) => {
-          try {
-            const latitude = +pos.coords.latitude.toFixed(2), longitude = +pos.coords.longitude.toFixed(2);
-            const res = await fetch(`https://api.aladhan.com/v1/timings/${format(new Date(), 'dd-MM-yyyy')}?latitude=${latitude}&longitude=${longitude}&method=1&school=${school}`);
-            applyData(await res.json());
-            localStorage.setItem('lastCoords', JSON.stringify({ latitude, longitude }));
-            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&accept-language=bn&lat=${latitude}&lon=${longitude}`, { headers: { 'User-Agent': 'IslamicApp-Android' } })
-              .then(r => r.json())
-              .then(j => {
-                const a = j.address || {};
-                const name = [a.city || a.town || a.county || a.state_district || a.village, a.country].filter(Boolean).join(', ');
-                if (name) { setPlaceName(name); localStorage.setItem('placeName', name); }
-              }).catch(() => {});
-          } catch (e) {
-            console.error(e);
-          } finally {
-            setLoading(false);
-          }
-        }, () => { loadByCity().catch(() => setLoading(false)); }, { timeout: 10000, maximumAge: 30 * 60 * 1000 });
+        let loc: { lat: number; lng: number };
+        try {
+          loc = await getLocation();
+        } catch {
+          // লোকেশন না পেলে শেষ জানা লোকেশন, তাও না থাকলে ঢাকা
+          const last = localStorage.getItem('lastCoords');
+          if (!last) return await loadByCity();
+          const c = JSON.parse(last);
+          loc = { lat: c.latitude, lng: c.longitude };
+        }
+        try {
+          const latitude = +loc.lat.toFixed(2), longitude = +loc.lng.toFixed(2);
+          const res = await fetch(`https://api.aladhan.com/v1/timings/${format(new Date(), 'dd-MM-yyyy')}?latitude=${latitude}&longitude=${longitude}&method=1&school=${school}`);
+          applyData(await res.json());
+          localStorage.setItem('lastCoords', JSON.stringify({ latitude, longitude }));
+          httpJson<any>({ url: `https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&accept-language=bn&lat=${latitude}&lon=${longitude}`, timeoutMs: 15000 })
+            .then(j => {
+              const a = j.address || {};
+              const name = [a.city || a.town || a.county || a.state_district || a.village, a.country].filter(Boolean).join(', ');
+              if (name) { setPlaceName(name); localStorage.setItem('placeName', name); }
+            }).catch(() => {});
+        } catch (e) {
+          console.error(e);
+          await loadByCity().catch(() => {});
+        } finally {
+          setLoading(false);
+        }
       } catch (error) {
         console.error('Failed to fetch prayer times:', error);
         setLoading(false);

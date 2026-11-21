@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      groq_key:
+        description: 'Groq API key (secret GROQ_API_KEY না থাকলে এটা ব্যবহার হবে)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -29,16 +34,24 @@ jobs:
 
       - name: Check Groq key
         run: |
-          if [ -z "${{ secrets.GROQ_API_KEY }}" ]; then echo "::warning::GROQ_API_KEY secret is not set — Ask Hujur will not work in this APK"; fi
+          if [ -z "${{ secrets.GROQ_API_KEY || inputs.groq_key }}" ]; then echo "::warning::GROQ_API_KEY secret is not set — Ask Hujur will not work in this APK"; fi
+
+      - name: Mask key
+        if: ${{ inputs.groq_key != '' }}
+        run: echo "::add-mask::${{ inputs.groq_key }}"
 
       - name: Build web app
         env:
           CAPACITOR: 'true'
-          VITE_GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          VITE_GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || inputs.groq_key }}
         run: npx vite build
 
       - name: Sync Capacitor
         run: npx cap sync android
+
+      - name: Verify key is bundled
+        run: |
+          if grep -q "gsk_" dist/assets/*.js; then echo "Groq key bundled ✓"; else echo "::warning::Groq key NOT bundled"; fi
 
       - name: Build APK
         working-directory: android

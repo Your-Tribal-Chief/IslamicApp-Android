@@ -120,7 +120,7 @@ export default function More() {
         </div>
 
         <div className="text-center pt-4 pb-4">
-          <p className="text-xs text-slate-400 font-medium tracking-widest uppercase mb-1">ভার্সন ১.১.০</p>
+          <p className="text-xs text-slate-400 font-medium tracking-widest uppercase mb-1">ভার্সন ১.২.০</p>
           <p className="text-[10px] text-emerald-600 dark:text-emerald-500 font-bold uppercase tracking-wider">Built by Ahmed Sajid Hasan (BUET CSE '21)</p>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { httpJson, HttpError } from './net';
 
 // APK-তে কোনো backend server নেই, তাই আগের /api/* serverless function গুলোর কাজ এখানে সরাসরি করা হচ্ছে।
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY as string;
@@ -19,32 +20,31 @@ export async function askHujur(messages: { role: string; content: string }[]): P
   let lastErr: unknown;
   for (const model of GROQ_MODELS) {
     try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      const data = await httpJson<any>({
+        url: 'https://api.groq.com/openai/v1/chat/completions',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_API_KEY}` },
-        body: JSON.stringify({ model, temperature: 0.6, max_tokens: 2048, messages: chat }),
+        headers: { Authorization: `Bearer ${GROQ_API_KEY}` },
+        json: { model, temperature: 0.6, max_completion_tokens: 4096, messages: chat },
+        timeoutMs: 60000,
       });
-      if (res.status === 401) throw new Error('Invalid Groq API key');
-      if (!res.ok) { lastErr = new Error(`Groq ${model} error ${res.status}`); continue; }
-      const data = await res.json();
       const text: string = data?.choices?.[0]?.message?.content ?? '';
-      if (text.trim()) return text;
+      if (text.trim()) return text.trim();
+      lastErr = new Error('empty reply');
     } catch (e) {
       lastErr = e;
-      if (e instanceof Error && e.message.includes('Invalid')) throw e;
+      // key ভুল হলে অন্য model চেষ্টা করে লাভ নেই
+      if (e instanceof HttpError && (e.status === 401 || e.status === 403)) throw new Error('API key সমস্যা (' + e.status + ')');
     }
   }
   throw lastErr ?? new Error('No reply');
 }
 
 export async function fetchMetalPrices(): Promise<{ gold: number; silver: number }> {
-  const [g, s] = await Promise.all([
-    fetch('https://api.gold-api.com/price/XAU'),
-    fetch('https://api.gold-api.com/price/XAG'),
+  const [gold, silver] = await Promise.all([
+    httpJson<any>({ url: 'https://api.gold-api.com/price/XAU', timeoutMs: 15000 }),
+    httpJson<any>({ url: 'https://api.gold-api.com/price/XAG', timeoutMs: 15000 }),
   ]);
-  if (!g.ok || !s.ok) throw new Error('Price API failed');
-  const gold = await g.json();
-  const silver = await s.json();
+  if (!gold?.price || !silver?.price) throw new Error('Price API failed');
   return { gold: gold.price, silver: silver.price };
 }
 

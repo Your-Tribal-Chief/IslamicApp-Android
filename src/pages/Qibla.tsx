@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Compass, ChevronLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { getLocation, locationErrorBn } from '../lib/net';
 
 export default function Qibla() {
   const navigate = useNavigate();
@@ -47,19 +48,9 @@ export default function Qibla() {
   };
 
   const startCompass = () => {
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const bearing = calculateQibla(position.coords.latitude, position.coords.longitude);
-          setQiblaBearing(bearing);
-        },
-        (err) => {
-          setError('লোকেশন পাওয়া যায়নি। দয়া করে লোকেশন চালু করুন।');
-        }
-      );
-    } else {
-      setError('আপনার ডিভাইসে লোকেশন সাপোর্ট করে না।');
-    }
+    getLocation()
+      .then(({ lat, lng }) => setQiblaBearing(calculateQibla(lat, lng)))
+      .catch((e) => setError(locationErrorBn(e)));
 
     window.addEventListener('deviceorientationabsolute', handleOrientation as any, true);
     // Fallback for iOS

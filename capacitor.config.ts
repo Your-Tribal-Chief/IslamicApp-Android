@@ -8,8 +8,9 @@ const config: CapacitorConfig = {
     adjustMarginsForEdgeToEdge: 'force',
   },
   plugins: {
-    // fetch() native layer দিয়ে যাবে, ফলে CORS সমস্যা হবে না (Overpass, Groq, gold-api ইত্যাদি)
-    CapacitorHttp: { enabled: true },
+    // সাধারণ fetch WebView দিয়েই যাবে; Groq, OSM, gold-api-র মতো request গুলো src/lib/net.ts থেকে
+    // সরাসরি native CapacitorHttp দিয়ে পাঠানো হয় (নিজস্ব User-Agent সহ, CORS ছাড়া)
+    CapacitorHttp: { enabled: false },
     SplashScreen: { launchShowDuration: 800, backgroundColor: '#065f46' },
     LocalNotifications: { iconColor: '#065f46' },
   },
