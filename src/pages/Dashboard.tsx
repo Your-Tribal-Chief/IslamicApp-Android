@@ -1,0 +1,522 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import { MapPin, Moon, Sun, BookOpen, Compass, CircleDot, Heart, Calculator, ChevronRight, BookText, MessageSquare, Bell, BellOff, Sparkles } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { format, addMinutes, isBefore, parse } from 'date-fns';
+import { bn } from 'date-fns/locale';
+import { Link } from 'react-router-dom';
+import { useTheme } from '../context/ThemeContext';
+import { requestNotifyPermission, schedulePrayerNotifications, cancelPrayerNotifications, showNow } from '../lib/native';
+
+interface PrayerTimes {
+  Fajr: string;
+  Sunrise: string;
+  Dhuhr: string;
+  Asr: string;
+  Sunset: string;
+  Maghrib: string;
+  Isha: string;
+  Imsak: string;
+  Midnight: string;
+}
+
+interface HijriDate {
+  date: string;
+  format: string;
+  day: string;
+  weekday: { en: string; ar: string };
+  month: { number: number; en: string; ar: string };
+  year: string;
+  designation: { abbreviated: string; expanded: string };
+  holidays: string[];
+}
+
+export default function Dashboard() {
+  const { theme, toggleTheme } = useTheme();
+  const [prayerTimes, setPrayerTimes] = useState<PrayerTimes | null>(null);
+  const [hijriDate, setHijriDate] = useState<HijriDate | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [dailyAyat, setDailyAyat] = useState({ text: '', ref: '' });
+  const [currentPrayer, setCurrentPrayer] = useState<{ name: string; id: string; time: string; endsIn: string } | null>(null);
+  const [nextPrayer, setNextPrayer] = useState<{ name: string; id: string; time: string; startsIn: string } | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+    return localStorage.getItem('notifications') === 'true';
+  });
+
+  const requestNotificationPermission = async () => {
+    const granted = await requestNotifyPermission();
+    if (granted) {
+      setNotificationsEnabled(true);
+      localStorage.setItem('notifications', 'true');
+    } else {
+      alert('নোটিফিকেশনের অনুমতি দেওয়া হয়নি। Settings থেকে অনুমতি দিন।');
+    }
+  };
+
+  const toggleNotifications = () => {
+    if (!notificationsEnabled) {
+      requestNotificationPermission();
+    } else {
+      setNotificationsEnabled(false);
+      localStorage.setItem('notifications', 'false');
+      cancelPrayerNotifications();
+    }
+  };
+
+  const updatePrayerStatus = useCallback((timings: PrayerTimes) => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    
+    const prayers = [
+      { name: 'ফজর', id: 'Fajr', time: timings.Fajr },
+      { name: 'যোহর', id: 'Dhuhr', time: timings.Dhuhr },
+      { name: 'আসর', id: 'Asr', time: timings.Asr },
+      { name: 'মাগরিব', id: 'Maghrib', time: timings.Maghrib },
+      { name: 'এশা', id: 'Isha', time: timings.Isha },
+    ];
+
+    let currentIdx = -1;
+    for (let i = 0; i < prayers.length; i++) {
+      const [h, m] = prayers[i].time.split(':').map(Number);
+      const prayerTime = h * 60 + m;
+      if (currentMinutes >= prayerTime) {
+        currentIdx = i;
+      }
+    }
+
+    const convertToBanglaNumber = (numStr: string) => {
+      const banglaDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+      return numStr.toString().replace(/\d/g, (match) => banglaDigits[parseInt(match)]);
+    };
+
+    const formatRemaining = (diff: number) => {
+      const hours = Math.floor(diff / 60);
+      const mins = diff % 60;
+      return `${hours > 0 ? convertToBanglaNumber(String(hours)) + ' ঘণ্টা ' : ''}${convertToBanglaNumber(String(mins))} মিনিট`;
+    };
+
+    if (currentIdx !== -1) {
+      const current = prayers[currentIdx];
+      const nextIdx = (currentIdx + 1) % prayers.length;
+      const next = prayers[nextIdx];
+      
+      // Ends in: Until next prayer starts
+      const [nh, nm] = next.time.split(':').map(Number);
+      let nextMinutes = nh * 60 + nm;
+      if (nextIdx === 0) nextMinutes += 24 * 60; 
+      
+      const diffEnds = nextMinutes - currentMinutes;
+      
+      // Starts in: Until next prayer starts (same as Ends in for the gap)
+      // But user wants "Fajr ends in 50 mins" AND "Dhuhr starts in 6 hrs"
+      // Wait, if Fajr is running, it ends when Sunrise starts or when Dhuhr starts?
+      // Usually "Wakt" ends at the next prayer time, except Fajr which ends at Sunrise.
+      
+      let currentWaktEndMinutes = nextMinutes;
+      if (current.id === 'Fajr') {
+        const [sh, sm] = timings.Sunrise.split(':').map(Number);
+        currentWaktEndMinutes = sh * 60 + sm;
+      }
+
+      const diffWaktEnds = currentWaktEndMinutes - currentMinutes;
+      
+      setCurrentPrayer({
+        ...current,
+        endsIn: diffWaktEnds > 0 ? formatRemaining(diffWaktEnds) : 'শেষ হয়েছে'
+      });
+
+      setNextPrayer({
+        ...next,
+        startsIn: formatRemaining(nextMinutes - currentMinutes)
+      });
+
+      // Simple notification check
+      if (notificationsEnabled && (diffWaktEnds === 30 || diffWaktEnds === 0)) {
+        const title = diffWaktEnds === 0 ? `${next.name} শুরু হয়েছে` : `${current.name} শেষ হতে ৩০ মিনিট বাকি`;
+        const key = `${format(now, 'yyyy-MM-dd')}-${current.id}-${diffWaktEnds}`;
+        if (diffWaktEnds === 30 && localStorage.getItem('lastNotifyKey') !== key) {
+          localStorage.setItem('lastNotifyKey', key);
+          showNow(title);
+        }
+      }
+
+    } else {
+      // Before Fajr
+      const next = prayers[0];
+      const [nh, nm] = next.time.split(':').map(Number);
+      const nextMinutes = nh * 60 + nm;
+      const diffStarts = nextMinutes - currentMinutes;
+
+      setCurrentPrayer({
+        name: 'শেষ রাত',
+        id: 'Tahajjud',
+        time: timings.Imsak,
+        endsIn: formatRemaining(diffStarts)
+      });
+      setNextPrayer({
+        ...next,
+        startsIn: formatRemaining(diffStarts)
+      });
+    }
+  }, [notificationsEnabled]);
+
+  useEffect(() => {
+    const ayats = [
+      { text: "নিশ্চয় কষ্টের সাথেই স্বস্তি রয়েছে।", ref: "সূরা আল-ইনশিরাহ, আয়াত ৫-৬" },
+      { text: "তোমরা আমাকে স্মরণ করো, আমিও তোমাদের স্মরণ করব।", ref: "সূরা আল-বাকারা, আয়াত ১৫২" },
+      { text: "আল্লাহ ধৈর্যশীলদের সাথে আছেন।", ref: "সূরা আল-বাকারা, আয়াত ১৫৩" },
+      { text: "হে আমাদের পালনকর্তা, আমাদের সরল পথ প্রদর্শন করুন।", ref: "সূরা আল-ফাতিহা, আয়াত ৬" },
+      { text: "আল্লাহর রহমত থেকে নিরাশ হয়ো না।", ref: "সূরা আজ-জুমার, আয়াত ৫৩" },
+      { text: "নিশ্চয় আল্লাহ তওবাকারীদের ভালোবাসেন।", ref: "সূরা আল-বাকারা, আয়াত ২২২" },
+      { text: "তোমাদের পালনকর্তা বলেন, তোমরা আমাকে ডাকো, আমি তোমাদের ডাকে সাড়া দেব।", ref: "সূরা গাফির, আয়াত ৬০" }
+    ];
+    
+    // Pick ayat based on day of the year
+    const now = new Date();
+    const start = new Date(now.getFullYear(), 0, 0);
+    const diff = now.getTime() - start.getTime();
+    const oneDay = 1000 * 60 * 60 * 24;
+    const dayOfYear = Math.floor(diff / oneDay);
+    
+    setDailyAyat(ayats[dayOfYear % ayats.length]);
+
+    async function fetchData() {
+      try {
+        // Use absolute URLs for Aladhan API
+        let url = 'https://api.aladhan.com/v1/timingsByCity?city=Dhaka&country=Bangladesh&method=1';
+        
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(async (pos) => {
+            const { latitude, longitude } = pos.coords;
+            const res = await fetch(`https://api.aladhan.com/v1/timings?latitude=${latitude}&longitude=${longitude}&method=1`);
+            const data = await res.json();
+            
+            if (data && data.data && data.data.timings) {
+              const timings = data.data.timings;
+              setPrayerTimes(timings);
+              setHijriDate(data.data.date.hijri);
+            } else {
+              throw new Error(data.message || 'Invalid prayer times data');
+            }
+          }, async () => {
+            // Fallback to Dhaka
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data && data.data && data.data.timings) {
+              const timings = data.data.timings;
+              setPrayerTimes(timings);
+              setHijriDate(data.data.date.hijri);
+            }
+          });
+        } else {
+          const res = await fetch(url);
+          const data = await res.json();
+          if (data && data.data && data.data.timings) {
+            const timings = data.data.timings;
+            setPrayerTimes(timings);
+            setHijriDate(data.data.date.hijri);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch prayer times:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []); // Only fetch once on mount
+
+  useEffect(() => {
+    if (prayerTimes) {
+      updatePrayerStatus(prayerTimes);
+      const interval = setInterval(() => {
+        updatePrayerStatus(prayerTimes);
+      }, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [prayerTimes, updatePrayerStatus]);
+
+  useEffect(() => {
+    if (prayerTimes && notificationsEnabled) schedulePrayerNotifications(prayerTimes as any);
+  }, [prayerTimes, notificationsEnabled]);
+
+  const convertToBanglaNumber = (numStr: string) => {
+    const banglaDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+    return numStr.toString().replace(/\d/g, (match) => banglaDigits[parseInt(match)]);
+  };
+
+  const formatTime = (timeStr: string) => {
+    if (!timeStr) return '';
+    const [hours, minutes] = timeStr.split(':');
+    let h = parseInt(hours);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return convertToBanglaNumber(`${h}:${minutes} ${ampm}`);
+  };
+
+  const [fastingCountdown, setFastingCountdown] = useState<{ label: string; time: string } | null>(null);
+
+  useEffect(() => {
+    if (!prayerTimes) return;
+
+    const timer = setInterval(() => {
+      const now = new Date();
+      const convertToBanglaNumber = (num: number) => {
+        const banglaDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+        return String(num).replace(/\d/g, (match) => banglaDigits[parseInt(match)]);
+      };
+
+      const parseTime = (timeStr: string, isTomorrow = false) => {
+        const [h, m] = timeStr.split(':').map(Number);
+        const d = new Date();
+        d.setHours(h, m, 0, 0);
+        if (isTomorrow) d.setDate(d.getDate() + 1);
+        return d;
+      };
+
+      const imsak = parseTime(prayerTimes.Imsak);
+      const maghrib = parseTime(prayerTimes.Maghrib);
+      const tomorrowImsak = parseTime(prayerTimes.Imsak, true);
+
+      let target: Date;
+      let label: string;
+
+      if (now < imsak) {
+        target = imsak;
+        label = 'সেহরি শেষ হতে বাকি';
+      } else if (now < maghrib) {
+        target = maghrib;
+        label = 'ইফতার শুরু হতে বাকি';
+      } else {
+        target = tomorrowImsak;
+        label = 'আগামীকাল সেহরি শেষ হতে';
+      }
+
+      const diff = target.getTime() - now.getTime();
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const secs = Math.floor((diff % (1000 * 60)) / 1000);
+
+      const timeStr = `${hours > 0 ? convertToBanglaNumber(hours) + ' ঘণ্টা ' : ''}${convertToBanglaNumber(mins)} মিনিট ${convertToBanglaNumber(secs)} সেকেন্ড`;
+      setFastingCountdown({ label, time: timeStr });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [prayerTimes]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-[#f5f5f0] space-y-4">
+        <div className="w-12 h-12 border-4 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
+        <p className="text-slate-500 font-medium">লোড হচ্ছে...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col min-h-full bg-[#f5f5f0] dark:bg-[#0c0c0c] pb-8 transition-colors duration-300">
+      {/* Hero Section */}
+      <div className="relative h-80 bg-emerald-900 dark:bg-emerald-950 rounded-b-[40px] overflow-hidden shadow-xl">
+        {/* Decorative Pattern */}
+        <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '24px 24px' }} />
+        <div className="absolute -right-20 -top-20 w-64 h-64 bg-emerald-800 dark:bg-emerald-900 rounded-full blur-3xl opacity-50" />
+        <div className="absolute -left-20 -bottom-20 w-64 h-64 bg-emerald-700 dark:bg-emerald-800 rounded-full blur-3xl opacity-30" />
+        
+        <div className="relative z-10 p-6 flex flex-col h-full justify-between text-white">
+          <div className="flex justify-between items-start">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center border border-white/20 shadow-inner">
+                <img 
+                  src="https://cdn-icons-png.flaticon.com/512/2913/2913520.png" 
+                  alt="Logo" 
+                  className="w-8 h-8 object-contain"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold font-serif mb-0.5">আস-সালামু আলাইকুম</h1>
+                <div className="flex items-center text-emerald-100/80 text-[10px] font-medium">
+                  <MapPin size={10} className="mr-1" />
+                  <span>ঢাকা, বাংলাদেশ</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <button 
+                onClick={toggleNotifications}
+                className="p-2 bg-white/10 rounded-xl backdrop-blur-md border border-white/10 text-white"
+              >
+                {notificationsEnabled ? <Bell size={18} /> : <BellOff size={18} />}
+              </button>
+              <button 
+                onClick={toggleTheme}
+                className="p-2 bg-white/10 rounded-xl backdrop-blur-md border border-white/10 text-white"
+              >
+                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+              <div className="text-right">
+                <div className="text-sm font-bold bg-white/10 px-3 py-1.5 rounded-2xl backdrop-blur-md border border-white/10">
+                  {convertToBanglaNumber(hijriDate?.day || '')} {hijriDate?.month.en} {convertToBanglaNumber(hijriDate?.year || '')}
+                </div>
+                <div className="text-[10px] text-emerald-100/60 mt-2 font-bold uppercase tracking-widest">
+                  {convertToBanglaNumber(format(new Date(), 'dd MMMM yyyy', { locale: bn }))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center pb-4">
+            <div className="mb-2">
+              <span className="bg-white/10 px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border border-white/5">
+                এখন {currentPrayer?.name}-এর সময়
+              </span>
+            </div>
+            <div className="space-y-1 mb-2">
+              <p className="text-emerald-100/70 text-[10px] font-bold uppercase tracking-wider">
+                {currentPrayer?.name} শেষ হতে: {currentPrayer?.endsIn}
+              </p>
+              <p className="text-emerald-100/70 text-[10px] font-bold uppercase tracking-wider">
+                {nextPrayer?.name} শুরু হতে: {nextPrayer?.startsIn}
+              </p>
+            </div>
+            <h2 className="text-5xl font-bold tracking-tighter">
+              {formatTime(nextPrayer?.time || '')}
+            </h2>
+            <p className="text-emerald-100/60 text-[10px] mt-2 font-bold uppercase tracking-widest">পরবর্তী: {nextPrayer?.name}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Actions Grid */}
+      <div className="px-4 -mt-8 relative z-20">
+        <div className="bg-white dark:bg-slate-900 rounded-[32px] p-6 shadow-xl shadow-emerald-900/5 dark:shadow-black/20 border border-slate-100 dark:border-slate-800 grid grid-cols-4 gap-y-6 gap-x-4 transition-colors">
+          <QuickAction to="/quran" icon={<BookOpen className="text-emerald-600" />} label="কুরআন" />
+          <QuickAction to="/hadith" icon={<BookText className="text-indigo-600" />} label="হাদিস" />
+          <QuickAction to="/dua" icon={<MessageSquare className="text-blue-600" />} label="দোয়া" />
+          <QuickAction to="/mosques" icon={<MapPin className="text-red-600" />} label="মসজিদ" />
+          <QuickAction to="/qibla" icon={<Compass className="text-orange-500" />} label="কিবলা" />
+          <QuickAction to="/tasbih" icon={<CircleDot className="text-blue-500" />} label="তাসবিহ" />
+          <QuickAction to="/names" icon={<Heart className="text-pink-500" />} label="নামসমূহ" />
+          <QuickAction to="/zakat" icon={<Calculator className="text-emerald-500" />} label="যাকাত" />
+          <QuickAction to="/ask-hujur" icon={<Sparkles className="text-amber-500" />} label="হুজুর" />
+        </div>
+      </div>
+
+      {/* Sehri & Iftar Cards */}
+      <div className="px-4 mt-6 space-y-4">
+        {fastingCountdown && (
+          <div className="bg-emerald-600 dark:bg-emerald-800 rounded-3xl p-4 text-white shadow-lg shadow-emerald-900/20 flex flex-col items-center justify-center text-center">
+            <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">{fastingCountdown.label}</p>
+            <p className="text-xl font-bold tracking-tight">{fastingCountdown.time}</p>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center space-x-3 transition-colors">
+            <div className="bg-indigo-50 dark:bg-indigo-950 p-3 rounded-2xl text-indigo-500">
+              <Moon size={20} />
+            </div>
+            <div>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">সেহরি শেষ</p>
+              <p className="text-base font-bold text-slate-800 dark:text-slate-200">{formatTime(prayerTimes?.Imsak || '')}</p>
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center space-x-3 transition-colors">
+            <div className="bg-orange-50 dark:bg-orange-950 p-3 rounded-2xl text-orange-500">
+              <Sun size={20} />
+            </div>
+            <div>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">ইফতার শুরু</p>
+              <p className="text-base font-bold text-slate-800 dark:text-slate-200">{formatTime(prayerTimes?.Maghrib || '')}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Daily Content */}
+      <div className="px-4 mt-8">
+        <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-3xl p-6 border border-emerald-100 dark:border-emerald-900/50 relative overflow-hidden transition-colors">
+          <div className="absolute -right-4 -bottom-4 opacity-5">
+            <BookOpen size={120} />
+          </div>
+          <h3 className="text-emerald-800 dark:text-emerald-400 font-bold text-sm mb-3 flex items-center">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-2" />
+            আজকের আয়াত
+          </h3>
+          <p className="text-emerald-900 dark:text-emerald-100 font-serif text-lg leading-relaxed italic">
+            "{dailyAyat.text}"
+          </p>
+          <p className="text-emerald-600 dark:text-emerald-500 text-xs mt-3 font-medium">— {dailyAyat.ref}</p>
+        </div>
+      </div>
+
+      {/* Prayer Times List */}
+      <div className="px-4 mt-8 mb-8">
+        <div className="flex items-center justify-between mb-4 px-1">
+          <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">নামাজের সময়সূচি</h3>
+          <Link to="/calendar" className="text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center">
+            বিস্তারিত <ChevronRight size={14} />
+          </Link>
+        </div>
+        <div className="bg-white dark:bg-slate-900 rounded-[32px] shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden transition-colors">
+          <PrayerRow name="ফজর" time={prayerTimes?.Fajr} icon={<Moon size={18} />} isUpcoming={nextPrayer?.name === 'ফজর'} />
+          <PrayerRow name="সূর্যোদয়" time={prayerTimes?.Sunrise} icon={<Sun size={18} />} isHighlight={false} />
+          <PrayerRow name="যোহর" time={prayerTimes?.Dhuhr} icon={<Sun size={18} />} isUpcoming={nextPrayer?.name === 'যোহর'} />
+          <PrayerRow name="আসর" time={prayerTimes?.Asr} icon={<Sun size={18} />} isUpcoming={nextPrayer?.name === 'আসর'} />
+          <PrayerRow name="মাগরিব" time={prayerTimes?.Maghrib} icon={<Moon size={18} />} isUpcoming={nextPrayer?.name === 'মাগরিব'} />
+          <PrayerRow name="এশা" time={prayerTimes?.Isha} icon={<Moon size={18} />} isUpcoming={nextPrayer?.name === 'এশা'} isLast />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickAction({ to, icon, label }: { to: string; icon: React.ReactNode; label: string }) {
+  return (
+    <Link to={to} className="flex flex-col items-center space-y-2 group">
+      <div className="w-12 h-12 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center group-active:scale-90 transition-all group-hover:bg-emerald-50 dark:group-hover:bg-emerald-900/30">
+        {icon}
+      </div>
+      <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400">{label}</span>
+    </Link>
+  );
+}
+
+function PrayerRow({ name, time, icon, isHighlight = true, isUpcoming = false, isLast = false }: { name: string, time?: string, icon: React.ReactNode, isHighlight?: boolean, isUpcoming?: boolean, isLast?: boolean }) {
+  const convertToBanglaNumber = (numStr: string) => {
+    const banglaDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+    return numStr.toString().replace(/\d/g, (match) => banglaDigits[parseInt(match)]);
+  };
+
+  const formatTime = (timeStr?: string) => {
+    if (!timeStr) return '';
+    const [hours, minutes] = timeStr.split(':');
+    let h = parseInt(hours);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return convertToBanglaNumber(`${h}:${minutes} ${ampm}`);
+  };
+
+  return (
+    <div className={cn(
+      "flex items-center justify-between p-4 px-6 transition-colors",
+      !isLast && "border-b border-slate-50 dark:border-slate-800",
+      !isHighlight && "opacity-40 bg-slate-50/30 dark:bg-slate-800/30",
+      isUpcoming && "bg-emerald-50/50 dark:bg-emerald-900/20"
+    )}>
+      <div className="flex items-center space-x-4 text-slate-700 dark:text-slate-300">
+        <div className={cn(
+          "p-2 rounded-xl transition-colors", 
+          isUpcoming ? "bg-emerald-600 text-white" : (isHighlight ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400" : "bg-slate-100 dark:bg-slate-800 text-slate-500")
+        )}>
+          {icon}
+        </div>
+        <div className="flex flex-col">
+          <span className="font-bold text-[14px]">{name}</span>
+          {isUpcoming && <span className="text-[8px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">পরবর্তী</span>}
+        </div>
+      </div>
+      <div className={cn("font-bold text-sm", isUpcoming ? "text-emerald-600 dark:text-emerald-400" : "text-slate-800 dark:text-slate-200")}>
+        {formatTime(time)}
+      </div>
+    </div>
+  );
+}
